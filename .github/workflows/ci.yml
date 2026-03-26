@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: go_with_me_ci
+        options: >-
+          --health-cmd "pg_isready -U postgres -d go_with_me_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    env:
+      DATABASE_WRITE_URL: postgres://postgres:postgres@localhost:5432/go_with_me_ci?sslmode=disable
+      REDIS_URL: redis://localhost:6379
+      APP_SECRET: ci-test-secret-key-at-least-32-chars-long-enough
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install tools
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+          go install github.com/pressly/goose/v3/cmd/goose@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify generated code is up-to-date
+        run: make gen-sqlc && git diff --exit-code
+
+      - name: Run migrations
+        run: make migrate-up
+
+      - name: Verify migration status
+        run: make migrate-status
+
+      - name: Run tests
+        run: make test
+
+      - name: Build
+        run: make build
+
+      - name: Build Docker image
+        run: docker build -t go-with-me:ci .

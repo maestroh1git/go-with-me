@@ -1,0 +1,9 @@
+tmp/
+.air.toml
+.git/
+.env
+.env.local
+*.md
+vendor/
+bin/
+coverage.out

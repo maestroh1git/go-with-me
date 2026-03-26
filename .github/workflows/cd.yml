@@ -1,0 +1,80 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  migrate:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install goose
+        run: go install github.com/pressly/goose/v3/cmd/goose@latest
+
+      - name: Run migrations
+        run: |
+          $(go env GOPATH)/bin/goose -dir migrations postgres "$DATABASE_WRITE_URL" up
+        env:
+          DATABASE_WRITE_URL: ${{ secrets.PROD_DATABASE_WRITE_URL }}
+
+  deploy:
+    needs: migrate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy
+        # Replace this step with your platform-specific deploy command.
+        # Examples:
+        #   Fly.io:   flyctl deploy --image ghcr.io/${{ github.repository }}:${{ github.sha }}
+        #   Railway:  railway up
+        #   Render:   curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        #   ECS:      aws ecs update-service --cluster prod --service app --force-new-deployment
+        run: echo "Hook your deploy command here (Fly.io, Railway, Render, ECS, K8s, etc.)"
